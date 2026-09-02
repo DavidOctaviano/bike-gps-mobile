@@ -65,7 +65,6 @@ public final class MainActivity extends Activity implements RideDashboardView.Ac
 
   @Override protected void onCreate(Bundle state) {
     super.onCreate(state);
-    configureSystemBars();
     dashboard = new RideDashboardView(this);
     dashboard.setActions(this);
     ScrollView scroll = new ScrollView(this);
@@ -74,6 +73,7 @@ public final class MainActivity extends Activity implements RideDashboardView.Ac
     scroll.addView(dashboard, new ScrollView.LayoutParams(
         ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
     setContentView(scroll);
+    configureSystemBars();
     locationManager = getSystemService(LocationManager.class);
     handleOAuthIntent(getIntent());
   }
@@ -83,7 +83,7 @@ public final class MainActivity extends Activity implements RideDashboardView.Ac
     window.setStatusBarColor(android.graphics.Color.rgb(5, 13, 12));
     window.setNavigationBarColor(android.graphics.Color.rgb(5, 13, 12));
     if (Build.VERSION.SDK_INT >= 30) {
-      WindowInsetsController controller = window.getInsetsController();
+      WindowInsetsController controller = window.getDecorView().getWindowInsetsController();
       if (controller != null) controller.setSystemBarsAppearance(0,
           WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
     }
