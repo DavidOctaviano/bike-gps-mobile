@@ -2,6 +2,10 @@
 
 Base de engenharia para o aplicativo companion Android/iOS e para a API que integra o Strava.
 
+## Gerar o APK
+
+Abra **Actions > Gerar APK Android > Run workflow**. Ao concluir, baixe o artefato `bike-gps-android`. O APK de depuração pode ser instalado diretamente no Android autorizando instalação de fontes desconhecidas.
+
 ## Estado desta entrega
 
 - Contrato OAuth seguro: o segredo e os refresh tokens do Strava ficam no backend.
