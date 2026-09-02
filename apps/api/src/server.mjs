@@ -22,7 +22,8 @@ export function createBikeGpsServer(config = process.env, options = {}) {
         const target = await broker.callback({
           code: url.searchParams.get("code"),
           state: url.searchParams.get("state"),
-          error: url.searchParams.get("error")
+          error: url.searchParams.get("error"),
+          scope: url.searchParams.get("scope")
         });
         return redirect(response, target);
       }
@@ -31,17 +32,19 @@ export function createBikeGpsServer(config = process.env, options = {}) {
         return json(response, 200, broker.exchangeTicket(body.ticket));
       }
       if (request.method === "GET" && url.pathname === "/strava/routes") {
-        const routes = await broker.listRoutes(bearer(request), positivePage(url.searchParams.get("page")));
-        return json(response, 200, { routes });
+        const result = await broker.listRoutes(bearer(request), positivePage(url.searchParams.get("page")));
+        return json(response, 200, result);
       }
       const exportMatch = request.method === "GET" && url.pathname.match(/^\/strava\/routes\/(\d+)\/gpx$/);
       if (exportMatch) {
-        const bytes = await broker.exportGpx(bearer(request), exportMatch[1]);
+        const result = await broker.exportGpx(bearer(request), exportMatch[1]);
+        const bytes = result.bytes;
         response.writeHead(200, {
           "Content-Type": "application/gpx+xml",
           "Content-Disposition": `attachment; filename=route-${exportMatch[1]}.gpx`,
           "Content-Length": bytes.length,
-          "Cache-Control": "no-store"
+          "Cache-Control": "no-store",
+          "X-BikeGPS-Session": result.sessionToken
         });
         return response.end(bytes);
       }

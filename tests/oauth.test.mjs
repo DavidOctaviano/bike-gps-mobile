@@ -15,15 +15,18 @@ function fixture() {
         athlete: { id: 42, firstname: "Ada", lastname: "Bike" }
       });
     }
+    if (url.includes("/athletes/42/routes")) return Response.json([]);
     throw new Error(`unexpected URL ${url}`);
   };
-  const broker = new StravaOAuthBroker({
+  const config = {
     clientId: "unit-test-client-id",
     clientSecret: "unit-test-server-secret",
     callbackUrl: "https://backend.test/oauth/strava/callback",
     appRedirectUrl: "bikegps://oauth/strava"
-  }, { fetch, now: () => 1_700_000_000_000, randomToken: () => `random-${++counter}` });
-  return { broker, requests };
+  };
+  const options = { fetch, now: () => 1_700_000_000_000, randomToken: () => `random-${++counter}` };
+  const broker = new StravaOAuthBroker(config, options);
+  return { broker, requests, config, options };
 }
 
 test("OAuth exchanges on the backend and returns only an opaque app session", async () => {
@@ -35,17 +38,21 @@ test("OAuth exchanges on the backend and returns only an opaque app session", as
 
   const appRedirect = new URL(await broker.callback({
     code: "one-time-code",
-    state: authorization.searchParams.get("state")
+    state: authorization.searchParams.get("state"),
+    scope: "read,read_all"
   }));
   const ticket = appRedirect.searchParams.get("ticket");
   const appResult = broker.exchangeTicket(ticket);
-  assert.deepEqual(appResult, { sessionToken: "random-3", athleteName: "Ada Bike" });
+  assert.equal(typeof appResult.sessionToken, "string");
+  assert.equal(appResult.athleteName, "Ada Bike");
+  assert.equal(appResult.sessionToken.includes("unit-test-access-value"), false);
   assert.equal(Object.hasOwn(appResult, "access_token"), false);
   assert.equal(Object.hasOwn(appResult, "refresh_token"), false);
 
-  const tokenBody = JSON.parse(requests[0].options.body);
-  assert.equal(tokenBody.client_secret, "unit-test-server-secret");
-  assert.equal(tokenBody.code, "one-time-code");
+  const tokenBody = new URLSearchParams(requests[0].options.body);
+  assert.equal(tokenBody.get("client_secret"), "unit-test-server-secret");
+  assert.equal(tokenBody.get("code"), "one-time-code");
+  assert.equal(requests[0].options.headers["Content-Type"], "application/x-www-form-urlencoded");
   assert.throws(() => broker.exchangeTicket(ticket), /OAUTH_TICKET_INVALID/);
 });
 
@@ -57,6 +64,35 @@ test("OAuth rejects an app redirect outside the allowlist", () => {
 test("OAuth state is single-use", async () => {
   const { broker } = fixture();
   const state = new URL(broker.begin("bikegps://oauth/strava")).searchParams.get("state");
-  await broker.callback({ code: "first", state });
-  await assert.rejects(() => broker.callback({ code: "replay", state }), /OAUTH_STATE_INVALID/);
+  await broker.callback({ code: "first", state, scope: "read,read_all" });
+  await assert.rejects(() => broker.callback({ code: "replay", state, scope: "read,read_all" }), /OAUTH_STATE_INVALID/);
+});
+
+test("OAuth refuses route access when read_all was not granted", async () => {
+  const { broker, requests } = fixture();
+  const authorization = new URL(broker.begin("bikegps://oauth/strava"));
+  const redirect = new URL(await broker.callback({
+    code: "unused-code",
+    state: authorization.searchParams.get("state"),
+    scope: "read"
+  }));
+  assert.equal(redirect.searchParams.get("error"), "STRAVA_SCOPE_READ_ALL_REQUIRED");
+  assert.equal(requests.length, 0);
+});
+
+test("encrypted session remains valid after a backend restart and rejects tampering", async () => {
+  const { broker, config, options } = fixture();
+  const authorization = new URL(broker.begin("bikegps://oauth/strava"));
+  const redirect = new URL(await broker.callback({
+    code: "one-time-code",
+    state: authorization.searchParams.get("state"),
+    scope: "read,read_all"
+  }));
+  const session = broker.exchangeTicket(redirect.searchParams.get("ticket")).sessionToken;
+
+  const restarted = new StravaOAuthBroker(config, options);
+  const result = await restarted.listRoutes(session);
+  assert.deepEqual(result.routes, []);
+  assert.equal(result.sessionToken, session);
+  await assert.rejects(() => restarted.listRoutes(session.slice(0, -1) + "x"), /SESSION_INVALID/);
 });

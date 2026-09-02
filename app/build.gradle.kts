@@ -8,8 +8,8 @@ android {
     applicationId = "com.bikegps.companion"
     minSdk = 26
     targetSdk = 35
-    versionCode = 2
-    versionName = "0.1.1"
+    versionCode = 3
+    versionName = "0.2.0"
 
     val apiBaseUrl = providers.gradleProperty("BIKEGPS_API_BASE_URL").orElse("").get()
     buildConfigField("String", "API_BASE_URL", "\"${apiBaseUrl.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
@@ -34,5 +34,6 @@ android {
 }
 
 dependencies {
+  implementation("org.maplibre.gl:android-sdk-opengl:13.6.0")
   testImplementation("junit:junit:4.13.2")
 }

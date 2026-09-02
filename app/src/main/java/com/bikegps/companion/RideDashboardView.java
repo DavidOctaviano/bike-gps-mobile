@@ -36,6 +36,7 @@ public final class RideDashboardView extends View {
   private final RectF transferButton = new RectF();
   private Actions actions;
   private boolean riding;
+  private boolean gpsFix;
   private boolean bleConnected;
   private boolean stravaConnected;
   private double averageKph;
@@ -54,6 +55,7 @@ public final class RideDashboardView extends View {
 
   public void setActions(Actions value) { actions = value; }
   public void setConnection(boolean connected) { bleConnected = connected; invalidate(); }
+  public void setGpsFix(boolean available) { gpsFix = available; invalidate(); }
   public void setStravaConnected(boolean connected) { stravaConnected = connected; invalidate(); }
   public void setMessage(String value) { message = value; invalidate(); }
   public void setTransferProgress(float value) { transferProgress = value; invalidate(); }
@@ -88,7 +90,7 @@ public final class RideDashboardView extends View {
     text(canvas, "BIKE GPS", margin, dp(42), dp(14), LIME, true);
     text(canvas, riding ? "PEDAL EM CURSO" : "PRONTO PARA PEDALAR?", margin, dp(77), dp(24), Color.WHITE, true);
     text(canvas, message, margin, dp(101), dp(12), MUTED, false);
-    statusPill(canvas, width - dp(146), dp(24), "GPS", riding, CYAN);
+    statusPill(canvas, width - dp(146), dp(24), "GPS", gpsFix, CYAN);
     statusPill(canvas, width - dp(82), dp(24), "BLE", bleConnected, LIME);
   }
 
@@ -153,8 +155,11 @@ public final class RideDashboardView extends View {
   private void drawMetrics(Canvas canvas, float left, float top, float right, float bottom) {
     roundPanel(canvas, left, top, right, bottom, dp(20), Color.rgb(9, 22, 20));
     text(canvas, "VELOCIDADE MÉDIA", left + dp(18), top + dp(27), dp(10), MUTED, true);
-    text(canvas, String.format(Locale.getDefault(), "%.1f", averageKph), left + dp(18), top + dp(87), dp(52), Color.WHITE, true);
-    text(canvas, "km/h", left + dp(116), top + dp(84), dp(12), LIME, true);
+    String averageText = String.format(Locale.getDefault(), "%.1f", averageKph);
+    float averageSize = averageKph >= 100 ? dp(42) : dp(52);
+    text(canvas, averageText, left + dp(18), top + dp(87), averageSize, Color.WHITE, true);
+    float unitX = Math.min(left + dp(174), left + dp(26) + paint.measureText(averageText));
+    text(canvas, "km/h", unitX, top + dp(84), dp(12), LIME, true);
     text(canvas, "AGORA", left + dp(190), top + dp(26), dp(9), MUTED, true);
     text(canvas, String.format(Locale.getDefault(), "%.1f km/h", liveKph), left + dp(190), top + dp(52), dp(16), Color.WHITE, true);
     text(canvas, "DISTÂNCIA", left + dp(190), top + dp(78), dp(9), MUTED, true);
@@ -227,6 +232,8 @@ public final class RideDashboardView extends View {
   }
 
   private void textCentered(Canvas canvas, String value, float x, float y, float size, int color, boolean bold) {
+    paint.setStyle(Paint.Style.FILL);
+    paint.setShader(null);
     paint.setTextAlign(Paint.Align.CENTER);
     paint.setTextSize(size);
     paint.setColor(color);

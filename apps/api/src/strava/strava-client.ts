@@ -66,15 +66,14 @@ export class StravaClient {
   private async tokenRequest(payload: Record<string, string>): Promise<StravaTokens> {
     const response = await fetch("https://www.strava.com/oauth/token", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
         client_id: this.clientId,
         client_secret: this.clientSecret,
         ...payload
-      })
+      }).toString()
     });
     if (!response.ok) throw new Error(`STRAVA_TOKEN_${response.status}`);
     return response.json() as Promise<StravaTokens>;
   }
 }
-

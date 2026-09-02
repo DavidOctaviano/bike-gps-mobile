@@ -55,6 +55,8 @@ public final class AndroidBleTransport implements RouteTransferEngine.Transport,
 
   @Override public void connect() throws IOException {
     if (connected) return;
+    ackMessages.clear();
+    statusMessages.clear();
     listener.onState(false, "Conectando ao Bike GPS…");
     connectionLatch = new CountDownLatch(1);
     gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE);
@@ -164,18 +166,23 @@ public final class AndroidBleTransport implements RouteTransferEngine.Transport,
     @Override public void onConnectionStateChange(BluetoothGatt callbackGatt, int result, int newState) {
       if (result == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED) {
         listener.onState(false, "BLE conectado · negociando MTU");
-        if (!callbackGatt.requestMtu(517)) callbackGatt.discoverServices();
+        callbackGatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH);
+        if (!callbackGatt.requestMtu(517) && !callbackGatt.discoverServices()) {
+          failConnection("Não foi possível descobrir os serviços GATT");
+        }
       } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
         connected = false;
-        listener.onState(false, "Bike GPS desconectado");
+        listener.onState(false, result == BluetoothGatt.GATT_SUCCESS
+            ? "Bike GPS desconectado" : "Conexão BLE falhou · GATT " + result);
         CountDownLatch latch = connectionLatch;
         if (latch != null) latch.countDown();
+        callbackGatt.close();
       }
     }
 
     @Override public void onMtuChanged(BluetoothGatt callbackGatt, int mtu, int result) {
       if (result == BluetoothGatt.GATT_SUCCESS) maximumWriteBytes = Math.max(20, mtu - 3);
-      callbackGatt.discoverServices();
+      if (!callbackGatt.discoverServices()) failConnection("Não foi possível descobrir os serviços GATT");
     }
 
     @Override public void onServicesDiscovered(BluetoothGatt callbackGatt, int result) {
@@ -199,7 +206,8 @@ public final class AndroidBleTransport implements RouteTransferEngine.Transport,
       else {
         connected = true;
         listener.onState(true, "Bike GPS conectado · MTU " + (maximumWriteBytes + 3));
-        connectionLatch.countDown();
+        CountDownLatch latch = connectionLatch;
+        if (latch != null) latch.countDown();
       }
     }
 
@@ -250,6 +258,8 @@ public final class AndroidBleTransport implements RouteTransferEngine.Transport,
     listener.onState(false, state);
     CountDownLatch latch = connectionLatch;
     if (latch != null) latch.countDown();
+    BluetoothGatt active = gatt;
+    if (active != null) active.disconnect();
   }
 
   public boolean isConnected() { return connected; }

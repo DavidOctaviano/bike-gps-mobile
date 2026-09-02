@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
 const STATE_TTL_MS = 10 * 60_000;
 const TICKET_TTL_MS = 60_000;
@@ -22,9 +22,12 @@ export class StravaOAuthBroker {
     this.fetch = options.fetch ?? globalThis.fetch;
     this.now = options.now ?? Date.now;
     this.randomToken = options.randomToken ?? (() => randomBytes(32).toString("base64url"));
+    this.sessionKey = createHash("sha256")
+      .update("bikegps-session-v1\0")
+      .update(this.clientSecret)
+      .digest();
     this.states = new Map();
     this.tickets = new Map();
-    this.sessions = new Map();
   }
 
   begin(appRedirectUrl) {
@@ -43,13 +46,17 @@ export class StravaOAuthBroker {
     return `https://www.strava.com/oauth/authorize?${query}`;
   }
 
-  async callback({ code, state, error }) {
+  async callback({ code, state, error, scope }) {
     this.cleanup();
     const pending = this.states.get(state);
     this.states.delete(state);
     if (!pending || pending.expiresAt <= this.now()) throw new OAuthError("OAUTH_STATE_INVALID");
     if (error) return appendQuery(pending.appRedirectUrl, { error });
     if (!code) throw new OAuthError("OAUTH_CODE_MISSING");
+    const acceptedScopes = new Set((scope ?? "").split(/[ ,]+/).filter(Boolean));
+    if (!acceptedScopes.has("read_all")) {
+      return appendQuery(pending.appRedirectUrl, { error: "STRAVA_SCOPE_READ_ALL_REQUIRED" });
+    }
     const tokens = await this.tokenRequest({ code, grant_type: "authorization_code" });
     const ticket = this.randomToken();
     this.tickets.set(ticket, { tokens, expiresAt: this.now() + TICKET_TTL_MS });
@@ -61,8 +68,7 @@ export class StravaOAuthBroker {
     const value = this.tickets.get(ticket);
     this.tickets.delete(ticket);
     if (!value || value.expiresAt <= this.now()) throw new OAuthError("OAUTH_TICKET_INVALID", 401);
-    const sessionToken = this.randomToken();
-    this.sessions.set(sessionToken, { tokens: value.tokens, expiresAt: this.now() + SESSION_TTL_MS });
+    const sessionToken = this.sealSession(value.tokens);
     const athlete = value.tokens.athlete ?? {};
     return {
       sessionToken,
@@ -80,17 +86,20 @@ export class StravaOAuthBroker {
     );
     if (!response.ok) throw new OAuthError(`STRAVA_ROUTES_${response.status}`, 502);
     const routes = await response.json();
-    return routes.map(route => ({
-      id: String(route.id_str ?? route.id),
-      name: route.name,
-      description: route.description ?? "",
-      distanceMeters: route.distance,
-      elevationGainMeters: route.elevation_gain,
-      estimatedMovingTimeSeconds: route.estimated_moving_time,
-      summaryPolyline: route.map?.summary_polyline ?? null,
-      isPrivate: Boolean(route.private),
-      updatedAt: route.updated_at
-    }));
+    return {
+      sessionToken: session.sessionToken,
+      routes: routes.map(route => ({
+        id: String(route.id_str ?? route.id),
+        name: route.name,
+        description: route.description ?? "",
+        distanceMeters: route.distance,
+        elevationGainMeters: route.elevation_gain,
+        estimatedMovingTimeSeconds: route.estimated_moving_time,
+        summaryPolyline: route.map?.summary_polyline ?? null,
+        isPrivate: Boolean(route.private),
+        updatedAt: route.updated_at
+      }))
+    };
   }
 
   async exportGpx(sessionToken, routeId) {
@@ -100,27 +109,35 @@ export class StravaOAuthBroker {
       headers: { Authorization: `Bearer ${session.tokens.access_token}` }
     });
     if (!response.ok) throw new OAuthError(`STRAVA_EXPORT_${response.status}`, 502);
-    return new Uint8Array(await response.arrayBuffer());
+    return {
+      bytes: new Uint8Array(await response.arrayBuffer()),
+      sessionToken: session.sessionToken
+    };
   }
 
   async activeSession(token) {
     this.cleanup();
-    const session = this.sessions.get(token);
-    if (!session || session.expiresAt <= this.now()) throw new OAuthError("SESSION_INVALID", 401);
+    const session = this.openSession(token);
+    let sessionToken = token;
     if (Number(session.tokens.expires_at) * 1000 <= this.now() + 5 * 60_000) {
       session.tokens = await this.tokenRequest({
         refresh_token: session.tokens.refresh_token,
         grant_type: "refresh_token"
       });
+      sessionToken = this.sealSession(session.tokens, session.expiresAt);
     }
-    return session;
+    return { ...session, sessionToken };
   }
 
   async tokenRequest(values) {
-    const response = await this.fetch("https://www.strava.com/oauth/token", {
+    const response = await this.fetch("https://www.strava.com/api/v3/oauth/token", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: this.clientId, client_secret: this.clientSecret, ...values })
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: this.clientId,
+        client_secret: this.clientSecret,
+        ...values
+      }).toString()
     });
     if (!response.ok) throw new OAuthError(`STRAVA_TOKEN_${response.status}`, 502);
     const tokens = await response.json();
@@ -132,7 +149,31 @@ export class StravaOAuthBroker {
     const now = this.now();
     for (const [key, value] of this.states) if (value.expiresAt <= now) this.states.delete(key);
     for (const [key, value] of this.tickets) if (value.expiresAt <= now) this.tickets.delete(key);
-    for (const [key, value] of this.sessions) if (value.expiresAt <= now) this.sessions.delete(key);
+  }
+
+  sealSession(tokens, expiresAt = this.now() + SESSION_TTL_MS) {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", this.sessionKey, iv);
+    const plaintext = Buffer.from(JSON.stringify({ version: 1, expiresAt, tokens }));
+    const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+    return Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString("base64url");
+  }
+
+  openSession(token) {
+    try {
+      if (typeof token !== "string" || token.length < 40) throw new Error("invalid");
+      const packed = Buffer.from(token, "base64url");
+      if (packed.length < 29) throw new Error("invalid");
+      const decipher = createDecipheriv("aes-256-gcm", this.sessionKey, packed.subarray(0, 12));
+      decipher.setAuthTag(packed.subarray(12, 28));
+      const plaintext = Buffer.concat([decipher.update(packed.subarray(28)), decipher.final()]);
+      const value = JSON.parse(plaintext.toString("utf8"));
+      if (value.version !== 1 || value.expiresAt <= this.now() || !value.tokens?.access_token
+          || !value.tokens?.refresh_token) throw new Error("invalid");
+      return value;
+    } catch (invalid) {
+      throw new OAuthError("SESSION_INVALID", 401);
+    }
   }
 }
 

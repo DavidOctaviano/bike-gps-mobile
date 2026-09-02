@@ -1,0 +1,12 @@
+.git
+.github
+.gradle
+.idea
+app
+firmware
+node_modules
+**/build
+*.apk
+*.jks
+*.keystore
+.env*
