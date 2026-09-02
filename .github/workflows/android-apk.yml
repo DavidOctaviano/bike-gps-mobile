@@ -1,4 +1,4 @@
-name: Gerar APK Android
+name: Android APK
 
 on:
   workflow_dispatch:
@@ -8,27 +8,66 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
+  build-debug-apk:
+    name: Testar e gerar app-debug.apk
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - name: Baixar repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.10.2"
-      - name: Testar protocolo
-        run: node --test tests/*.test.mjs
-      - name: Compilar APK
-        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar plataforma Android 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Configurar cache Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Testar contratos e OAuth
+        run: npm test
+
+      - name: Testar Android e compilar APK
+        env:
+          BIKEGPS_API_BASE_URL: ${{ vars.BIKEGPS_API_BASE_URL }}
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:lintDebug :app:testDebugUnitTest :app:assembleDebug \
+            "-PBIKEGPS_API_BASE_URL=${BIKEGPS_API_BASE_URL}" \
+            --stacktrace
+
+      - name: Verificar APK
+        shell: bash
+        run: |
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          unzip -t app/build/outputs/apk/debug/app-debug.apk
+          "${ANDROID_HOME}/build-tools/35.0.0/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk
+          sha256sum app/build/outputs/apk/debug/app-debug.apk | tee app/build/outputs/apk/debug/app-debug.apk.sha256
+
       - name: Publicar APK para download
         uses: actions/upload-artifact@v4
         with:
-          name: bike-gps-android
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: bike-gps-android-debug
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/debug/app-debug.apk.sha256
           if-no-files-found: error
-
+          retention-days: 30

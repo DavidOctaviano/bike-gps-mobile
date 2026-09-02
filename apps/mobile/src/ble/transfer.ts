@@ -35,6 +35,7 @@ export async function transferRoute(
     filename: input.filename,
     format: input.format,
     fileSize: input.bytes.length,
+    chunkSize,
     totalChunks,
     sha256: input.sha256
   };
@@ -49,10 +50,15 @@ export async function transferRoute(
     let confirmed = false;
 
     for (let attempt = 0; attempt < 3 && !confirmed; attempt++) {
-      await transport.writeData(packet);
-      const ack = await transport.waitForAck(sequence, 3_000);
-      if (ack.status === "NO_SPACE") throw new Error("DEVICE_STORAGE_FULL");
-      confirmed = ack.status === "OK";
+      try {
+        await transport.writeData(packet);
+        const ack = await transport.waitForAck(sequence, 3_000);
+        if (ack.status === "NO_SPACE") throw new Error("DEVICE_STORAGE_FULL");
+        confirmed = ack.status === "OK";
+      } catch (error) {
+        if (error instanceof Error && error.message === "DEVICE_STORAGE_FULL") throw error;
+        if (attempt === 2) throw error;
+      }
     }
     if (!confirmed) throw new Error(`CHUNK_FAILED_${sequence}`);
     sequence += 1;
@@ -63,4 +69,3 @@ export async function transferRoute(
   const result = await transport.waitForComplete(15_000);
   if (result.sha256 !== input.sha256) throw new Error("FINAL_HASH_MISMATCH");
 }
-

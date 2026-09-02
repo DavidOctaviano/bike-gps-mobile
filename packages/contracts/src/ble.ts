@@ -21,7 +21,7 @@ export type TransferManifest = {
   filename: string;
   format: "GPX" | "FIT";
   fileSize: number;
+  chunkSize: number;
   totalChunks: number;
   sha256: string;
 };
-
