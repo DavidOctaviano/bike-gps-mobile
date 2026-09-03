@@ -48,10 +48,16 @@ jobs:
       - name: Testar Android e compilar APK
         env:
           BIKEGPS_API_BASE_URL: ${{ vars.BIKEGPS_API_BASE_URL }}
+          MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
+          BIKEGPS_ACTIVITY_TILES_URL: ${{ vars.BIKEGPS_ACTIVITY_TILES_URL }}
+          BIKEGPS_ACTIVITY_TILES_LAYER: ${{ vars.BIKEGPS_ACTIVITY_TILES_LAYER }}
         run: |
           chmod +x gradlew
           ./gradlew :app:lintDebug :app:testDebugUnitTest :app:assembleDebug \
             "-PBIKEGPS_API_BASE_URL=${BIKEGPS_API_BASE_URL}" \
+            "-PMAPBOX_ACCESS_TOKEN=${MAPBOX_ACCESS_TOKEN}" \
+            "-PBIKEGPS_ACTIVITY_TILES_URL=${BIKEGPS_ACTIVITY_TILES_URL}" \
+            "-PBIKEGPS_ACTIVITY_TILES_LAYER=${BIKEGPS_ACTIVITY_TILES_LAYER}" \
             --stacktrace
 
       - name: Verificar APK

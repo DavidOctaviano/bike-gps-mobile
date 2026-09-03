@@ -7,7 +7,8 @@ Primeiro entregável do ecossistema Bike GPS: aplicativo Android nativo instalá
 O aplicativo em `app/` oferece:
 
 - painel de pedal em uma tela, com navegação central e velocidade média em destaque;
-- mapa vetorial MapLibre/OpenFreeMap, marcador da localização precisa e câmera que acompanha o pedal;
+- mapa Mapbox com dados viários derivados do OpenStreetMap, marcador da localização precisa e câmera que acompanha o pedal;
+- estilos Claro, Escuro e Satélite híbrido, cache local automático, POIs agrupados e heatmap MVT opcional;
 - rota GPX offline de demonstração em Lagoa da Prata (MG), desenhada sobre o mapa real;
 - gravação de distância e velocidade com GPS enquanto a tela está aberta;
 - descoberta e conexão Bluetooth LE com estados visíveis;
@@ -21,13 +22,17 @@ Compile com JDK 17, Android SDK 35 e Gradle 8.10.2:
 ./gradlew :app:testDebugUnitTest :app:assembleDebug
 ```
 
-O arquivo local será `app/build/outputs/apk/debug/app-debug.apk`. Para apontar o APK a um backend implantado, compile com:
+O arquivo local será `app/build/outputs/apk/debug/app-debug.apk`. Para ativar o Mapbox e apontar o APK a um backend implantado, compile com:
 
 ```bash
-./gradlew :app:assembleDebug -PBIKEGPS_API_BASE_URL=https://seu-backend.example
+./gradlew :app:assembleDebug \
+  -PMAPBOX_ACCESS_TOKEN=<TOKEN_PUBLICO_PK> \
+  -PBIKEGPS_API_BASE_URL=https://seu-backend.example
 ```
 
-Sem essa propriedade, o APK continua instalável e todas as funções de mapa/GPS/BLE funcionam. Ao tocar em **Strava**, o usuário pode informar a URL HTTPS do backend no próprio aplicativo, sem recompilar. O mapa precisa de internet para baixar a cartografia; a rota demo e os dados GPX continuam disponíveis localmente depois de carregados.
+`MAPBOX_ACCESS_TOKEN` aceita exclusivamente um token público `pk.`. Nunca use um token secreto `sk.`. Sem a propriedade, o APK continua instalável e abre sem crash; o usuário pode tocar na área do mapa e informar seu token público no próprio aparelho. Ao tocar em **Strava**, também é possível informar a URL HTTPS do backend sem recompilar. O Mapbox conserva em cache local os recursos já visualizados; a rota demo e os dados GPX permanecem disponíveis no aplicativo.
+
+Para a configuração completa dos mapas, OSM, cache, estilos, clustering e heatmap MVT, consulte [docs/maps.md](docs/maps.md).
 
 ## Backend OAuth do Strava
 
@@ -59,7 +64,7 @@ O layout fornecido pressupõe flash de 8 MB. Consulte [docs/ble-protocol.md](doc
 
 ## Testes e APK no GitHub
 
-`npm test` executa os testes do contrato e do OAuth. O workflow **Android APK** executa os testes Node e Android, compila, valida o ZIP do APK, calcula SHA-256 e publica o artefato `bike-gps-android-debug` em cada push para `main` ou execução manual.
+`npm test` executa os testes do contrato e do OAuth. O workflow **Android APK** executa os testes Node e Android, compila, valida o ZIP do APK, calcula SHA-256 e publica o artefato `bike-gps-android-debug` em cada push para `main` ou execução manual. Configure o secret `MAPBOX_ACCESS_TOKEN` com um token público real `pk.` para que o APK publicado já saia com o mapa ativado. As configurações opcionais `BIKEGPS_ACTIVITY_TILES_URL` e `BIKEGPS_ACTIVITY_TILES_LAYER` são repository variables.
 
 No GitHub, abra **Actions → Android APK → execução mais recente → Artifacts → bike-gps-android-debug**.
 

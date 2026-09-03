@@ -66,6 +66,7 @@ public final class MainActivity extends Activity implements RideDashboardView.Ac
   private static final long SCAN_MILLIS = 12_000;
   private static final String CONFIG_PREFS = "bikegps_config";
   private static final String API_URL = "api_base_url";
+  private static final String MAPBOX_TOKEN = "mapbox_public_token";
 
   private final Handler main = new Handler(Looper.getMainLooper());
   private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -98,7 +99,16 @@ public final class MainActivity extends Activity implements RideDashboardView.Ac
     dashboard = new RideDashboardView(this);
     dashboard.setActions(this);
     dashboard.setStravaConnected(backendSession != null);
-    mapController = new BikeMapController(this, state, dashboard::setMessage);
+    String mapboxToken = MapboxTokenPolicy.resolve(
+        config.getString(MAPBOX_TOKEN, ""), BuildConfig.MAPBOX_ACCESS_TOKEN);
+    mapController = new BikeMapController(
+        this,
+        state,
+        mapboxToken,
+        BuildConfig.ACTIVITY_TILES_URL,
+        BuildConfig.ACTIVITY_TILES_LAYER,
+        dashboard::setMessage,
+        this::showMapboxDialog);
     setContentView(buildContent());
     configureSystemBars();
     handleOAuthIntent(getIntent());
@@ -153,6 +163,32 @@ public final class MainActivity extends Activity implements RideDashboardView.Ac
     locateParams.setMargins(0, dp(124), dp(31), 0);
     content.addView(locate, locateParams);
 
+    TextView styleSwitch = mapControl(mapController.styleLabel());
+    styleSwitch.setContentDescription("Alternar estilo do mapa");
+    styleSwitch.setOnClickListener(ignored -> styleSwitch.setText(mapController.cycleStyle()));
+    FrameLayout.LayoutParams styleParams = new FrameLayout.LayoutParams(dp(76), dp(38));
+    styleParams.gravity = Gravity.TOP | Gravity.END;
+    styleParams.setMargins(0, dp(178), dp(31), 0);
+    content.addView(styleSwitch, styleParams);
+
+    TextView heatmap = mapControl("CALOR");
+    heatmap.setContentDescription("Mostrar ou ocultar mapa de calor de atividades");
+    heatmap.setTextColor(mapController.hasActivityHeatmap()
+        ? Color.rgb(255, 116, 38) : Color.rgb(145, 158, 154));
+    heatmap.setOnClickListener(ignored -> {
+      if (!mapController.hasActivityHeatmap()) {
+        dashboard.setMessage("Heatmap MVT não configurado no servidor desta versão");
+        return;
+      }
+      boolean visible = mapController.toggleActivityHeatmap();
+      heatmap.setAlpha(visible ? 1f : 0.55f);
+      dashboard.setMessage(visible ? "Mapa de calor ativado" : "Mapa de calor oculto");
+    });
+    FrameLayout.LayoutParams heatmapParams = new FrameLayout.LayoutParams(dp(76), dp(38));
+    heatmapParams.gravity = Gravity.TOP | Gravity.END;
+    heatmapParams.setMargins(0, dp(224), dp(31), 0);
+    content.addView(heatmap, heatmapParams);
+
     ScrollView scroll = new ScrollView(this);
     scroll.setFillViewport(true);
     scroll.setBackgroundColor(Color.rgb(5, 13, 12));
@@ -166,6 +202,18 @@ public final class MainActivity extends Activity implements RideDashboardView.Ac
     result.setColor(color);
     result.setCornerRadius(radius);
     return result;
+  }
+
+  private TextView mapControl(String label) {
+    TextView control = new TextView(this);
+    control.setText(label);
+    control.setGravity(Gravity.CENTER);
+    control.setTextSize(10);
+    control.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+    control.setTextColor(Color.WHITE);
+    control.setBackground(rounded(Color.argb(225, 5, 13, 12), dp(14)));
+    control.setElevation(dp(8));
+    return control;
   }
 
   private void configureSystemBars() {
@@ -523,6 +571,45 @@ public final class MainActivity extends Activity implements RideDashboardView.Ac
       dialog.dismiss();
       onStrava();
     }));
+    dialog.show();
+    input.requestFocus();
+    main.postDelayed(() -> {
+      InputMethodManager keyboard = getSystemService(InputMethodManager.class);
+      if (keyboard != null) keyboard.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT);
+    }, 250);
+  }
+
+  private void showMapboxDialog() {
+    EditText input = new EditText(this);
+    input.setHint("pk. ...");
+    input.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+        | android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+    input.setSingleLine(true);
+    String saved = config.getString(MAPBOX_TOKEN, "");
+    if (saved != null) input.setText(saved);
+    int padding = dp(22);
+    FrameLayout container = new FrameLayout(this);
+    container.setPadding(padding, dp(4), padding, 0);
+    container.addView(input, new FrameLayout.LayoutParams(
+        FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
+    AlertDialog dialog = new AlertDialog.Builder(this)
+        .setTitle("Ativar mapas Mapbox")
+        .setMessage("Informe somente um token público Mapbox iniciado por pk. Tokens secretos sk. são recusados e nunca devem entrar no aplicativo.")
+        .setView(container)
+        .setNegativeButton("Cancelar", null)
+        .setPositiveButton("Salvar", null)
+        .create();
+    dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+        .setOnClickListener(button -> {
+          String value = input.getText().toString().trim();
+          if (!MapboxTokenPolicy.isUsablePublicToken(value)) {
+            input.setError("Use um token público Mapbox válido iniciado por pk.");
+            return;
+          }
+          config.edit().putString(MAPBOX_TOKEN, value).apply();
+          dialog.dismiss();
+          recreate();
+        }));
     dialog.show();
     input.requestFocus();
     main.postDelayed(() -> {
